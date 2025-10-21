@@ -10,10 +10,10 @@ import speech_recognition as sr
 import pyttsx3
 import random
 from werkzeug.utils import secure_filename
-
+import sqlite3
 import tempfile
 import traceback
-from flask import Flask, request, jsonify, render_template, redirect, url_for
+from flask import Flask, request, jsonify, render_template, redirect, url_for, g
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 from flask_wtf import FlaskForm
 from wtforms import StringField, PasswordField, SubmitField
@@ -23,6 +23,7 @@ from io import BytesIO
 import tempfile
 import traceback
 import subprocess
+from datetime import datetime
 
 # Define threshold consistent with training
 threshold = 0.5
@@ -34,7 +35,7 @@ r.phrase_threshold = 0.3
 r.non_speaking_duration = 0.8
 engine = pyttsx3.init()
 
-# Model class
+# Model class (handles video classification)
 class HierarchicalVideoClassifierR2plus1D(nn.Module):
     def __init__(self, pretrained=True, dropout=0.5):
         super().__init__()
@@ -79,10 +80,10 @@ transform = transforms.Compose([
 ])
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'powerhouse'
-app.config['UPLOAD_FOLDER'] = 'uploads'
+app.config['SECRET_KEY'] = 'powerhouse'  # Secret key for security (change this in production)
+app.config['UPLOAD_FOLDER'] = 'uploads'  # Folder for uploaded video files
 app.config['ALLOWED_EXTENSIONS'] = {'mp4', 'avi', 'mov', 'mkv', 'wav', 'webm', 'ogg'}
-os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)  # Creates uploads folder if it doesn't exist
 
 # Flask-Login setup
 login_manager = LoginManager()
@@ -94,7 +95,7 @@ login_manager.login_view = 'login'
 def inject_user():
     return dict(user=current_user)
 
-# In-memory user store
+# In-memory user store (for simplicity; replace with database in production)
 users = {'admin': {'password_hash': generate_password_hash('adminpass123'), 'role': 'admin'}}
 
 class User(UserMixin):
@@ -113,6 +114,24 @@ class LoginForm(FlaskForm):
     username = StringField('Username', validators=[DataRequired()])
     password = PasswordField('Password', validators=[DataRequired()])
     submit = SubmitField('Login')
+
+# Database setup per request (SQLite will create emergency_response.db automatically)
+def get_db():
+    if 'db' not in g:
+        g.db = sqlite3.connect('emergency_response.db', check_same_thread=False)
+        g.db.row_factory = sqlite3.Row  # Optional: for dictionary-like rows
+        # Create tables if not exist
+        cursor = g.db.cursor()
+        cursor.execute('CREATE TABLE IF NOT EXISTS predictions (id INTEGER PRIMARY KEY AUTOINCREMENT, class TEXT, confidence REAL, input_type TEXT, timestamp DATETIME)')
+        cursor.execute('CREATE TABLE IF NOT EXISTS transcriptions (id INTEGER PRIMARY KEY AUTOINCREMENT, text TEXT, input_type TEXT, timestamp DATETIME)')
+        g.db.commit()
+    return g.db
+
+@app.teardown_appcontext
+def close_db(exception):
+    db = g.pop('db', None)
+    if db is not None:
+        db.close()
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in app.config['ALLOWED_EXTENSIONS']
@@ -192,50 +211,71 @@ def logout():
 @app.route('/admin_dashboard')
 @login_required
 def admin_dashboard():
-    all_data = {
-        'video_predictions': [],
-        'audio_transcriptions': []
-    }
+    db = get_db()
+    cursor = db.cursor()
+
+    # Fetch video predictions from SQLite
+    cursor.execute('SELECT class, confidence, input_type FROM predictions WHERE input_type = ?', ('video',))
+    video_predictions = [{'class': row[0], 'confidence': f"{row[1]:.2%}", 'input_type': row[2]} for row in cursor.fetchall()]
+
+    # Fetch audio transcriptions from SQLite
+    cursor.execute('SELECT text, input_type FROM transcriptions WHERE input_type = ?', ('audio',))
+    audio_transcriptions = [{'text': row[0], 'input_type': row[1]} for row in cursor.fetchall()]
+
+    all_data = {'video_predictions': video_predictions, 'audio_transcriptions': audio_transcriptions}
     return render_template('admin_dashboard.html', data=all_data)
 
 # Video prediction
 @app.route('/predict_video', methods=['POST'])
 def predict_video():
-    if 'file' not in request.files:
-        return jsonify({'error': 'No file part'})
-    file = request.files['file']
-    if file.filename == '':
-        return jsonify({'error': 'No selected file'})
-    if file and allowed_file(file.filename):
-        filename = secure_filename(file.filename)
-        video_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-        file.save(video_path)
+    db = get_db()
+    cursor = db.cursor()
+    try:
+        if 'file' not in request.files:
+            return jsonify({'error': 'No file part'}), 400
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({'error': 'No selected file'}), 400
+        if file and allowed_file(file.filename):
+            filename = secure_filename(file.filename)
+            video_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+            file.save(video_path)
 
-        frames = extract_frames(video_path)
-        if frames is None:
+            frames = extract_frames(video_path)
+            if frames is None:
+                os.remove(video_path)
+                return jsonify({'error': 'Failed to process video'}), 400
+
+            with torch.no_grad():
+                frames = frames.to(device)
+                out_bin, out_anom = model(frames)
+                p_bin = torch.softmax(out_bin, dim=1)[0, 1].item()
+                if p_bin >= threshold:
+                    p_anom = torch.softmax(out_anom, dim=1)[0]
+                    pred_idx = torch.argmax(p_anom).item()
+                    pred_class = classes[pred_idx]
+                    confidence = p_anom[pred_idx].item()
+                else:
+                    pred_class = "normal"
+                    confidence = 1 - p_bin
+
+            # Store in SQLite
+            cursor.execute('INSERT INTO predictions (class, confidence, input_type, timestamp) VALUES (?, ?, ?, ?)',
+                           (pred_class, confidence, 'video', datetime.utcnow()))
+            db.commit()
+
             os.remove(video_path)
-            return jsonify({'error': 'Failed to process video'})
-
-        with torch.no_grad():
-            frames = frames.to(device)
-            out_bin, out_anom = model(frames)
-            p_bin = torch.softmax(out_bin, dim=1)[0, 1].item()
-            if p_bin >= threshold:
-                p_anom = torch.softmax(out_anom, dim=1)[0]
-                pred_idx = torch.argmax(p_anom).item()
-                pred_class = classes[pred_idx]
-                confidence = p_anom[pred_idx].item()
-            else:
-                pred_class = "normal"
-                confidence = 1 - p_bin
-
-        os.remove(video_path)
-        return jsonify({'prediction': pred_class, 'confidence': f"{confidence:.2%}", 'input_type': 'video'})
-    return jsonify({'error': 'Invalid file type'})
+            return jsonify({'prediction': pred_class, 'confidence': f"{confidence:.2%}", 'input_type': 'video'}), 200
+        return jsonify({'error': 'Invalid file type'}), 400
+    except Exception as e:
+        print(f"Error in predict_video: {e}")
+        return jsonify({'error': 'Server error', 'detail': str(e)}), 500
 
 # Audio prediction
 @app.route("/predict_audio", methods=["POST"])
 def predict_audio():
+    db = get_db()
+    cursor = db.cursor()
     def _safe_remove(path):
         try:
             if path and os.path.exists(path):
@@ -271,6 +311,10 @@ def predict_audio():
 
         try:
             text = recognizer.recognize_google(audio_data)
+            # Store in SQLite
+            cursor.execute('INSERT INTO transcriptions (text, input_type, timestamp) VALUES (?, ?, ?)',
+                           (text, 'audio', datetime.utcnow()))
+            db.commit()
             return jsonify({"text": text})
         except sr.UnknownValueError:
             return jsonify({"error": "Unintelligible speech"}), 200

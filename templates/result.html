@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Analysis Result</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        .container {
+            background: white;
+            padding: 40px;
+            border-radius: 15px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+            max-width: 600px;
+            width: 100%;
+            text-align: center;
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 30px;
+        }
+        .result-box {
+            background: #f8f9fa;
+            padding: 30px;
+            border-radius: 10px;
+            margin-bottom: 30px;
+        }
+        .prediction {
+            font-size: 2em;
+            font-weight: bold;
+            color: #667eea;
+            margin-bottom: 15px;
+            text-transform: capitalize;
+        }
+        .prediction.anomaly {
+            color: #dc3545;
+        }
+        .prediction.normal {
+            color: #28a745;
+        }
+        .confidence {
+            font-size: 1.5em;
+            color: #666;
+            margin-bottom: 10px;
+        }
+        .input-type {
+            color: #999;
+            font-size: 0.9em;
+        }
+        .btn {
+            padding: 12px 30px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 5px;
+            font-size: 16px;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-block;
+            margin: 5px;
+            transition: transform 0.2s;
+        }
+        .btn:hover {
+            transform: translateY(-2px);
+        }
+        .icon {
+            font-size: 60px;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Analysis Result</h1>
+        
+        <div class="result-box">
+            {% if prediction == 'normal' %}
+                <div class="icon">✅</div>
+                <div class="prediction normal">{{ prediction }}</div>
+            {% else %}
+                <div class="icon">⚠️</div>
+                <div class="prediction anomaly">{{ prediction }}</div>
+            {% endif %}
+            
+            <div class="confidence">Confidence: {{ confidence }}</div>
+            <div class="input-type">Input Type: {{ input_type }}</div>
+        </div>
+        
+        <a href="{{ url_for('index') }}" class="btn">Analyze Another</a>
+    </div>
+</body>
+</html>

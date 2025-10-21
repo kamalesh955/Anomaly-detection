@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>Audio Transcription Result</title>
+    <style>
+        * { margin:0; padding:0; box-sizing:border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height:100vh;
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            padding:20px;
+        }
+        .container {
+            background:white; padding:40px; border-radius:15px;
+            box-shadow:0 10px 40px rgba(0,0,0,0.2); max-width:600px; width:100%;
+            text-align:center;
+        }
+        h1 { color:#333; margin-bottom:30px; }
+        .transcription-box { background:#f8f9fa; padding:30px; border-radius:10px; margin-bottom:30px; }
+        .icon { font-size:60px; margin-bottom:20px; }
+        .text-content {
+            font-size:1.2em; color:#333; line-height:1.6; padding:20px; background:white;
+            border-radius:5px; border-left:4px solid #667eea;
+        }
+        .btn {
+            padding:12px 30px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color:white; border:none; border-radius:5px; font-size:16px; cursor:pointer;
+            text-decoration:none; display:inline-block; margin:5px; transition:transform 0.2s;
+        }
+        .btn:hover { transform: translateY(-2px); }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Audio Transcription</h1>
+
+        <div class="transcription-box">
+            <div class="icon">🎙️</div>
+            <div class="text-content">
+                "{{ text }}"
+            </div>
+        </div>
+
+        <a href="{{ url_for('audio') }}" class="btn">Record Again</a>
+        <a href="{{ url_for('index') }}" class="btn">Back to Home</a>
+    </div>
+</body>
+</html>

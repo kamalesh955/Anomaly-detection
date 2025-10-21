@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Admin Dashboard</title>
+<style>
+/* Your previous CSS here */
+table { width: 100%; border-collapse: collapse; margin-bottom:20px; }
+th, td { padding: 12px; border-bottom: 1px solid #ddd; text-align:left; }
+</style>
+</head>
+<body>
+<h1>Admin Dashboard</h1>
+
+<h2>Video Predictions</h2>
+<table>
+    <thead>
+        <tr>
+            <th>Timestamp</th>
+            <th>Prediction</th>
+            <th>Confidence</th>
+        </tr>
+    </thead>
+    <tbody id="video-table">
+        {% for pred in data.video_predictions %}
+        <tr>
+            <td>{{ pred.timestamp }}</td>
+            <td>{{ pred.prediction }}</td>
+            <td>{{ pred.confidence }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+<h2>Audio Transcriptions</h2>
+<table>
+    <thead>
+        <tr>
+            <th>Timestamp</th>
+            <th>Transcription</th>
+        </tr>
+    </thead>
+    <tbody id="audio-table">
+        {% for trans in data.audio_transcriptions %}
+        <tr>
+            <td>{{ trans.timestamp }}</td>
+            <td>{{ trans.text }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+<script>
+async function fetchAdminUpdates() {
+    const res = await fetch('/admin_data');
+    const json = await res.json();
+
+    const videoTable = document.getElementById('video-table');
+    videoTable.innerHTML = '';
+    json.video_predictions.forEach(pred => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${pred.timestamp}</td><td>${pred.prediction}</td><td>${pred.confidence}</td>`;
+        videoTable.appendChild(tr);
+    });
+
+    const audioTable = document.getElementById('audio-table');
+    audioTable.innerHTML = '';
+    json.audio_transcriptions.forEach(trans => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${trans.timestamp}</td><td>${trans.text}</td>`;
+        audioTable.appendChild(tr);
+    });
+}
+
+// Poll every 5 seconds
+setInterval(fetchAdminUpdates, 5000);
+</script>
+</body>
+</html>

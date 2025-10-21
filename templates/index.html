@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Video Anomaly Detection System</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        header {
+            text-align: center;
+            color: white;
+            margin-bottom: 50px;
+        }
+        h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+        .subtitle {
+            font-size: 1.2em;
+            opacity: 0.9;
+        }
+        .main-content {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 30px;
+            margin-bottom: 30px;
+        }
+        .card {
+            background: white;
+            padding: 30px;
+            border-radius: 15px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+            text-align: center;
+            transition: transform 0.3s;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+        }
+        .card h2 {
+            color: #333;
+            margin-bottom: 20px;
+        }
+        .card p {
+            color: #666;
+            margin-bottom: 20px;
+            line-height: 1.6;
+        }
+        .upload-area {
+            border: 2px dashed #ddd;
+            padding: 40px 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            transition: border-color 0.3s;
+        }
+        .upload-area:hover {
+            border-color: #667eea;
+        }
+        input[type="file"] {
+            display: none;
+        }
+        .upload-label {
+            display: inline-block;
+            padding: 12px 30px;
+            background: #667eea;
+            color: white;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        .upload-label:hover {
+            background: #5568d3;
+        }
+        .btn {
+            padding: 12px 30px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 5px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: transform 0.2s;
+            margin-top: 10px;
+        }
+        .btn:hover {
+            transform: translateY(-2px);
+        }
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        #fileName {
+            margin-top: 15px;
+            color: #666;
+            font-size: 14px;
+        }
+        .admin-link {
+            text-align: center;
+            margin-top: 30px;
+        }
+        .admin-link a {
+            color: white;
+            text-decoration: none;
+            font-size: 16px;
+            padding: 10px 20px;
+            background: rgba(255,255,255,0.2);
+            border-radius: 5px;
+            transition: background 0.3s;
+        }
+        .admin-link a:hover {
+            background: rgba(255,255,255,0.3);
+        }
+        .loading {
+            display: none;
+            margin-top: 20px;
+            color: #667eea;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🎥 Video Anomaly Detection System</h1>
+            <p class="subtitle">AI-powered detection of accidents, robbery, fighting, explosions, and shootings</p>
+        </header>
+
+        <div class="main-content">
+            <!-- Video Upload Card -->
+            <div class="card">
+                <h2>📹 Video Analysis</h2>
+                <p>Upload a video file to detect anomalies and potential threats</p>
+                
+                <div class="upload-area">
+                    <label for="videoFile" class="upload-label">Choose Video File</label>
+                    <input type="file" id="videoFile" accept="video/*" onchange="showFileName()">
+                    <div id="fileName"></div>
+                </div>
+                
+                <button class="btn" onclick="uploadVideo()" id="videoBtn">Analyze Video</button>
+                <div class="loading" id="videoLoading">Processing... Please wait</div>
+            </div>
+
+            <!-- Audio Input Card -->
+            <div class="card">
+                <h2>🎤 Audio Analysis</h2>
+                <p>Use your microphone to record and transcribe audio in real-time</p>
+                
+                <div class="upload-area">
+                    <p>Click the button below to start recording audio</p>
+                </div>
+                
+                <button class="btn" onclick="window.location.href='{{ url_for('audio') }}'">Go to Audio Page</button>
+            </div>
+        </div>
+
+        <div class="admin-link">
+            <a href="{{ url_for('login') }}">🔐 Admin Dashboard</a>
+        </div>
+    </div>
+
+    <script>
+        function showFileName() {
+            const input = document.getElementById('videoFile');
+            const fileNameDiv = document.getElementById('fileName');
+            if (input.files.length > 0) {
+                fileNameDiv.textContent = '✓ Selected: ' + input.files[0].name;
+            }
+        }
+
+        async function uploadVideo() {
+            const fileInput = document.getElementById('videoFile');
+            const btn = document.getElementById('videoBtn');
+            const loading = document.getElementById('videoLoading');
+            
+            if (!fileInput.files.length) {
+                alert('Please select a video file first');
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+
+            btn.disabled = true;
+            loading.style.display = 'block';
+
+            try {
+                const response = await fetch('/predict_video', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+                
+                if (data.error) {
+                    alert('Error: ' + data.error);
+                } else {
+                    window.location.href = `/result?pred=${data.prediction}&conf=${data.confidence}&input_type=${data.input_type}`;
+                }
+            } catch (error) {
+                alert('Error uploading video: ' + error);
+            } finally {
+                btn.disabled = false;
+                loading.style.display = 'none';
+            }
+        }
+    </script>
+</body>
+</html>
+    

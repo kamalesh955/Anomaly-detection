@@ -9,7 +9,6 @@ import torchvision.models.video as video_models
 import speech_recognition as sr
 import pyttsx3
 import random
-from werkzeug.utils import secure_filename
 import sqlite3
 import tempfile
 import traceback
@@ -19,23 +18,19 @@ from flask_wtf import FlaskForm
 from wtforms import StringField, PasswordField, SubmitField
 from wtforms.validators import DataRequired
 from werkzeug.security import generate_password_hash, check_password_hash
-from io import BytesIO
-import tempfile
-import traceback
-import subprocess
 from datetime import datetime
 
-# Define threshold consistent with training
+# Threshold for anomaly detection
 threshold = 0.5
 
-# Initialize speech recognizer and TTS engine
+# Speech recognition and TTS
 r = sr.Recognizer()
 r.pause_threshold = 10
 r.phrase_threshold = 0.3
 r.non_speaking_duration = 0.8
 engine = pyttsx3.init()
 
-# Model class (handles video classification)
+# Video classification model
 class HierarchicalVideoClassifierR2plus1D(nn.Module):
     def __init__(self, pretrained=True, dropout=0.5):
         super().__init__()
@@ -59,14 +54,13 @@ class HierarchicalVideoClassifierR2plus1D(nn.Module):
         out_anom = self.head_anomaly(feats)
         return out_bin, out_anom
 
-# Load model
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model = HierarchicalVideoClassifierR2plus1D(pretrained=False).to(device)
 try:
     model.load_state_dict(torch.load('best_r2p1d_hierarchical.pth', map_location=device))
     print("Model loaded successfully")
 except RuntimeError as e:
-    print(f"Error loading state_dict: {e}")
+    print(f"Error loading model: {e}")
 model.eval()
 
 classes = ["accident", "robbery", "fighting", "explosion", "shooting", "normal"]
@@ -80,22 +74,19 @@ transform = transforms.Compose([
 ])
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'powerhouse'  # Secret key for security (change this in production)
-app.config['UPLOAD_FOLDER'] = 'uploads'  # Folder for uploaded video files
+app.config['SECRET_KEY'] = 'powerhouse'
+app.config['UPLOAD_FOLDER'] = 'uploads'
 app.config['ALLOWED_EXTENSIONS'] = {'mp4', 'avi', 'mov', 'mkv', 'wav', 'webm', 'ogg'}
-os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)  # Creates uploads folder if it doesn't exist
+os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
-# Flask-Login setup
 login_manager = LoginManager()
 login_manager.init_app(app)
 login_manager.login_view = 'login'
 
-# ✅ FIX: make user available to all templates
 @app.context_processor
 def inject_user():
     return dict(user=current_user)
 
-# In-memory user store (for simplicity; replace with database in production)
 users = {'admin': {'password_hash': generate_password_hash('adminpass123'), 'role': 'admin'}}
 
 class User(UserMixin):
@@ -105,25 +96,39 @@ class User(UserMixin):
 
 @login_manager.user_loader
 def load_user(username):
-    if username in users:
-        return User(username)
-    return None
+    return User(username) if username in users else None
 
-# Login form
 class LoginForm(FlaskForm):
     username = StringField('Username', validators=[DataRequired()])
     password = PasswordField('Password', validators=[DataRequired()])
     submit = SubmitField('Login')
 
-# Database setup per request (SQLite will create emergency_response.db automatically)
 def get_db():
     if 'db' not in g:
         g.db = sqlite3.connect('emergency_response.db', check_same_thread=False)
-        g.db.row_factory = sqlite3.Row  # Optional: for dictionary-like rows
-        # Create tables if not exist
+        g.db.row_factory = sqlite3.Row
         cursor = g.db.cursor()
-        cursor.execute('CREATE TABLE IF NOT EXISTS predictions (id INTEGER PRIMARY KEY AUTOINCREMENT, class TEXT, confidence REAL, input_type TEXT, timestamp DATETIME)')
-        cursor.execute('CREATE TABLE IF NOT EXISTS transcriptions (id INTEGER PRIMARY KEY AUTOINCREMENT, text TEXT, input_type TEXT, timestamp DATETIME)')
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS predictions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                class TEXT,
+                confidence REAL,
+                input_type TEXT,
+                latitude REAL,
+                longitude REAL,
+                timestamp DATETIME
+            )
+        ''')
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS transcriptions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                text TEXT,
+                input_type TEXT,
+                latitude REAL,
+                longitude REAL,
+                timestamp DATETIME
+            )
+        ''')
         g.db.commit()
     return g.db
 
@@ -157,75 +162,37 @@ def extract_frames(video_path, clip_len=16, frame_skip=5):
     cap.release()
     while len(frames) < clip_len:
         frames.append(frames[-1])
-    frames = torch.stack(frames)
-    frames = frames.permute(1, 0, 2, 3)
+    frames = torch.stack(frames).permute(1, 0, 2, 3)
     return frames.unsqueeze(0)
 
-def listen_once():
-    try:
-        with sr.Microphone() as source:
-            print("🎤 Listening... Speak now!")
-            r.adjust_for_ambient_noise(source, duration=1.0)
-            audio = r.listen(source, timeout=10, phrase_time_limit=30)
-            text = r.recognize_google(audio).lower()
-            print(f"📝 You said: {text}")
-            engine.say(text)
-            engine.runAndWait()
-            return text
-    except sr.RequestError as e:
-        print(f"❌ Could not request results: {e}")
-        return None
-    except sr.UnknownValueError:
-        print("❓ Could not understand audio")
-        return None
-    except sr.WaitTimeoutError:
-        print("⏰ Timeout")
-        return None
-    except Exception as e:
-        print(f"Unexpected error: {e}")
-        return None
-
-# Login route
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     form = LoginForm()
     if form.validate_on_submit():
         username = form.username.data
         if username in users and check_password_hash(users[username]['password_hash'], form.password.data):
-            user = User(username)
-            login_user(user)
+            login_user(User(username))
             return redirect(url_for('admin_dashboard'))
-        else:
-            return render_template('login.html', form=form, error='Invalid username or password')
+        return render_template('login.html', form=form, error='Invalid username or password')
     return render_template('login.html', form=form)
 
-# Logout route
 @app.route('/logout', methods=['GET', 'POST'])
 @login_required
 def logout():
-    print(f"Logout method: {request.method}")
     logout_user()
     return redirect(url_for('index'))
 
-# Admin dashboard
 @app.route('/admin_dashboard')
 @login_required
 def admin_dashboard():
     db = get_db()
     cursor = db.cursor()
+    cursor.execute('SELECT class, confidence, input_type, latitude, longitude FROM predictions WHERE input_type = ?', ('video',))
+    video_predictions = [{'class': row[0], 'confidence': f"{row[1]:.2%}", 'input_type': row[2], 'latitude': row[3], 'longitude': row[4]} for row in cursor.fetchall()]
+    cursor.execute('SELECT text, input_type, latitude, longitude FROM transcriptions WHERE input_type = ?', ('audio',))
+    audio_transcriptions = [{'text': row[0], 'input_type': row[1], 'latitude': row[2], 'longitude': row[3]} for row in cursor.fetchall()]
+    return render_template('admin_dashboard.html', data={'video_predictions': video_predictions, 'audio_transcriptions': audio_transcriptions})
 
-    # Fetch video predictions from SQLite
-    cursor.execute('SELECT class, confidence, input_type FROM predictions WHERE input_type = ?', ('video',))
-    video_predictions = [{'class': row[0], 'confidence': f"{row[1]:.2%}", 'input_type': row[2]} for row in cursor.fetchall()]
-
-    # Fetch audio transcriptions from SQLite
-    cursor.execute('SELECT text, input_type FROM transcriptions WHERE input_type = ?', ('audio',))
-    audio_transcriptions = [{'text': row[0], 'input_type': row[1]} for row in cursor.fetchall()]
-
-    all_data = {'video_predictions': video_predictions, 'audio_transcriptions': audio_transcriptions}
-    return render_template('admin_dashboard.html', data=all_data)
-
-# Video prediction
 @app.route('/predict_video', methods=['POST'])
 def predict_video():
     db = get_db()
@@ -240,6 +207,9 @@ def predict_video():
             filename = secure_filename(file.filename)
             video_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
             file.save(video_path)
+
+            latitude = request.form.get('latitude', type=float)
+            longitude = request.form.get('longitude', type=float)
 
             frames = extract_frames(video_path)
             if frames is None:
@@ -259,29 +229,25 @@ def predict_video():
                     pred_class = "normal"
                     confidence = 1 - p_bin
 
-            # Store in SQLite
-            cursor.execute('INSERT INTO predictions (class, confidence, input_type, timestamp) VALUES (?, ?, ?, ?)',
-                           (pred_class, confidence, 'video', datetime.utcnow()))
+            cursor.execute('INSERT INTO predictions (class, confidence, input_type, latitude, longitude, timestamp) VALUES (?, ?, ?, ?, ?, ?)',
+                           (pred_class, confidence, 'video', latitude, longitude, datetime.utcnow()))
             db.commit()
-
             os.remove(video_path)
-            return jsonify({'prediction': pred_class, 'confidence': f"{confidence:.2%}", 'input_type': 'video'}), 200
-        return jsonify({'error': 'Invalid file type'}), 400
+
+            return jsonify({'prediction': pred_class, 'confidence': f"{confidence:.2%}", 'input_type': 'video'})
+        else:
+            return jsonify({'error': 'Invalid file type'}), 400
     except Exception as e:
         print(f"Error in predict_video: {e}")
         return jsonify({'error': 'Server error', 'detail': str(e)}), 500
 
-# Audio prediction
-@app.route("/predict_audio", methods=["POST"])
+@app.route('/predict_audio', methods=['POST'])
 def predict_audio():
     db = get_db()
     cursor = db.cursor()
     def _safe_remove(path):
-        try:
-            if path and os.path.exists(path):
-                os.remove(path)
-        except Exception:
-            pass
+        if path and os.path.exists(path):
+            os.remove(path)
 
     if "audio" not in request.files:
         return jsonify({"error": "No audio file part"}), 400
@@ -304,6 +270,9 @@ def predict_audio():
         if os.path.getsize(tmp_wav) == 0:
             _safe_remove(tmp_wav)
             return jsonify({"error": "Empty file"}), 400
+        
+        latitude = request.form.get('latitude', type=float)
+        longitude = request.form.get('longitude', type=float)
 
         recognizer = sr.Recognizer()
         with sr.AudioFile(tmp_wav) as source:
@@ -311,9 +280,8 @@ def predict_audio():
 
         try:
             text = recognizer.recognize_google(audio_data)
-            # Store in SQLite
-            cursor.execute('INSERT INTO transcriptions (text, input_type, timestamp) VALUES (?, ?, ?)',
-                           (text, 'audio', datetime.utcnow()))
+            cursor.execute('INSERT INTO transcriptions (text, input_type, latitude, longitude, timestamp) VALUES (?, ?, ?, ?, ?)',
+                           (text, 'audio', latitude, longitude, datetime.utcnow()))
             db.commit()
             return jsonify({"text": text})
         except sr.UnknownValueError:

@@ -65,246 +65,243 @@
     </div>
 
     <script>
-    /*
-    Browser-side WAV recorder (WebAudio) -> downsamples to 16kHz mono -> encodes 16-bit PCM WAV
-    Uploads as multipart/form-data field 'audio' with filename 'recording.wav'
-    Works without server-side ffmpeg.
-    */
+        let userLatitude = null;
+        let userLongitude = null;
 
-    const btn = document.getElementById('recordBtn');
-    const loading = document.getElementById('loading');
+        function requestLocation() {
+            if (!navigator.geolocation) {
+                alert("Geolocation is not supported by your browser.");
+                return;
+            }
+            navigator.geolocation.getCurrentPosition(
+                (pos) => {
+                    userLatitude = pos.coords.latitude;
+                    userLongitude = pos.coords.longitude;
+                    console.log("User location:", userLatitude, userLongitude);
+                },
+                (err) => {
+                    console.warn('Location permission denied or error:', err.message);
+                },
+                { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
+            );
+        }
+        document.addEventListener("DOMContentLoaded", requestLocation);
 
-    let audioContext = null;
-    let mediaStream = null;
-    let recorderWorker = null;
-    let recording = false;
-    let audioData = [];
+        const btn = document.getElementById('recordBtn');
+        const loading = document.getElementById('loading');
 
-    btn.addEventListener('click', handleRecordButton);
+        let audioContext = null;
+        let mediaStream = null;
+        let recorderWorker = null;
+        let recording = false;
+        let audioData = [];
 
-    async function handleRecordButton() {
-    if (recording) {
-        await stopRecordingAndUpload();
-    } else {
-        startRecording();
-    }
-    }
+        btn.addEventListener('click', handleRecordButton);
 
-    async function startRecording() {
-    try {
-        btn.disabled = true;
-        loading.style.display = 'block';
-        loading.textContent = 'Requesting microphone permission...';
-
-        mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        audioContext = new (window.AudioContext || window.webkitAudioContext)();
-        const source = audioContext.createMediaStreamSource(mediaStream);
-
-        // ScriptProcessor is deprecated but widely supported. Use AudioWorklet where available.
-        const bufferSize = 4096;
-        const processor = audioContext.createScriptProcessor(bufferSize, 1, 1);
-
-        source.connect(processor);
-        processor.connect(audioContext.destination);
-
-        audioData = [];
-
-        processor.onaudioprocess = (e) => {
-        const inputBuffer = e.inputBuffer.getChannelData(0); // mono
-        // clone the Float32Array
-        audioData.push(new Float32Array(inputBuffer));
-        };
-
-        // store references for stopping
-        recorderWorker = { processor, source };
-
-        recording = true;
-        btn.textContent = 'Stop Recording';
-        btn.disabled = false;
-        loading.textContent = '🎙️ Recording... Speak clearly';
-    } catch (err) {
-        console.error('getUserMedia error', err);
-        alert('Microphone access denied or not available: ' + (err.message || err));
-        btn.disabled = false;
-        loading.style.display = 'none';
-        cleanupLocal();
-    }
-    }
-
-    async function stopRecordingAndUpload() {
-    try {
-        btn.disabled = true;
-        loading.style.display = 'block';
-        loading.textContent = 'Stopping... preparing audio';
-
-        // stop capturing audio nodes
-        if (recorderWorker) {
-        try { recorderWorker.processor.disconnect(); } catch (e) {}
-        try { recorderWorker.source.disconnect(); } catch (e) {}
+        async function handleRecordButton() {
+            if (recording) {
+                await stopRecordingAndUpload();
+            } else {
+                startRecording();
+            }
         }
 
-        // stop media tracks
-        if (mediaStream) mediaStream.getTracks().forEach(t => t.stop());
+        async function startRecording() {
+            try {
+                btn.disabled = true;
+                loading.style.display = 'block';
+                loading.textContent = 'Requesting microphone permission...';
 
-        // merge Float32 chunks
-        let length = 0;
-        for (let i = 0; i < audioData.length; i++) length += audioData[i].length;
-        const merged = new Float32Array(length);
-        let offset = 0;
-        for (let i = 0; i < audioData.length; i++) {
-        merged.set(audioData[i], offset);
-        offset += audioData[i].length;
+                mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                const source = audioContext.createMediaStreamSource(mediaStream);
+
+                const bufferSize = 4096;
+                const processor = audioContext.createScriptProcessor(bufferSize, 1, 1);
+
+                source.connect(processor);
+                processor.connect(audioContext.destination);
+
+                audioData = [];
+
+                processor.onaudioprocess = (e) => {
+                    const inputBuffer = e.inputBuffer.getChannelData(0);
+                    audioData.push(new Float32Array(inputBuffer));
+                };
+
+                recorderWorker = { processor, source };
+                recording = true;
+                btn.textContent = 'Stop Recording';
+                btn.disabled = false;
+                loading.textContent = '🎙️ Recording... Speak clearly';
+            } catch (err) {
+                console.error('getUserMedia error', err);
+                alert('Microphone access denied or not available: ' + (err.message || err));
+                btn.disabled = false;
+                loading.style.display = 'none';
+                cleanupLocal();
+            }
         }
 
-        // downsample to 16000 Hz (if needed)
-        const targetRate = 16000;
-        const originalRate = audioContext.sampleRate;
-        const downsampled = downsampleBuffer(merged, originalRate, targetRate);
+        async function stopRecordingAndUpload() {
+            try {
+                btn.disabled = true;
+                loading.style.display = 'block';
+                loading.textContent = 'Stopping... preparing audio';
 
-        // encode WAV 16-bit PCM
-        const wavBlob = encodeWAV(downsampled, targetRate);
+                if (recorderWorker) {
+                    try { recorderWorker.processor.disconnect(); } catch (e) { }
+                    try { recorderWorker.source.disconnect(); } catch (e) { }
+                }
 
-        // upload
-        loading.textContent = 'Uploading audio...';
-        const formData = new FormData();
-        formData.append('audio', wavBlob, 'recording.wav');
+                if (mediaStream) mediaStream.getTracks().forEach(t => t.stop());
 
-        const resp = await fetch('/predict_audio', {
-        method: 'POST',
-        body: formData
-        });
+                let length = 0;
+                for (let i = 0; i < audioData.length; i++) length += audioData[i].length;
+                const merged = new Float32Array(length);
+                let offset = 0;
+                for (let i = 0; i < audioData.length; i++) {
+                    merged.set(audioData[i], offset);
+                    offset += audioData[i].length;
+                }
 
-        if (!resp.ok) {
-        const t = await resp.text();
-        throw new Error(`Server returned ${resp.status}: ${t}`);
+                const targetRate = 16000;
+                const originalRate = audioContext.sampleRate;
+                const downsampled = downsampleBuffer(merged, originalRate, targetRate);
+
+                const wavBlob = encodeWAV(downsampled, targetRate);
+
+                loading.textContent = 'Uploading audio...';
+
+                const formData = new FormData();
+                formData.append('audio', wavBlob, 'recording.wav');
+
+                // Append GPS coordinates if available
+                if (userLatitude !== null && userLongitude !== null) {
+                    formData.append('latitude', userLatitude);
+                    formData.append('longitude', userLongitude);
+                }
+
+                const resp = await fetch('/predict_audio', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (!resp.ok) {
+                    const t = await resp.text();
+                    throw new Error(`Server returned ${resp.status}: ${t}`);
+                }
+
+                const data = await resp.json();
+
+                if (data.error) {
+                    alert('Error: ' + (data.detail ? `${data.error}\n${data.detail}` : data.error));
+                } else if (data.text !== undefined) {
+                    window.location.href = `/audio_result?text=${encodeURIComponent(data.text)}`;
+                } else {
+                    alert('Unexpected server response');
+                }
+            } catch (err) {
+                console.error('Recording/upload error', err);
+                alert('Error recording/uploading audio: ' + (err.message || err));
+            } finally {
+                cleanupLocal();
+                btn.textContent = 'Start Recording';
+                btn.disabled = false;
+                loading.style.display = 'none';
+                recording = false;
+            }
         }
 
-        const data = await resp.json();
-
-        if (data.error) {
-        alert('Error: ' + (data.detail ? `${data.error}\n${data.detail}` : data.error));
-        } else if (data.text !== undefined) {
-        window.location.href = `/audio_result?text=${encodeURIComponent(data.text)}`;
-        } else {
-        alert('Unexpected server response');
+        function downsampleBuffer(buffer, sampleRate, outSampleRate) {
+            if (outSampleRate === sampleRate) return buffer;
+            if (outSampleRate > sampleRate) {
+                console.warn('Target sample rate is higher than original. Returning original buffer.');
+                return buffer;
+            }
+            const sampleRateRatio = sampleRate / outSampleRate;
+            const newLength = Math.round(buffer.length / sampleRateRatio);
+            const result = new Float32Array(newLength);
+            let offsetResult = 0;
+            let offsetBuffer = 0;
+            while (offsetResult < result.length) {
+                const nextOffsetBuffer = Math.round((offsetResult + 1) * sampleRateRatio);
+                let accum = 0, count = 0;
+                for (let i = offsetBuffer; i < nextOffsetBuffer && i < buffer.length; i++) {
+                    accum += buffer[i];
+                    count++;
+                }
+                result[offsetResult] = count ? (accum / count) : 0;
+                offsetResult++;
+                offsetBuffer = nextOffsetBuffer;
+            }
+            return result;
         }
-    } catch (err) {
-        console.error('Recording/upload error', err);
-        alert('Error recording/uploading audio: ' + (err.message || err));
-    } finally {
-        cleanupLocal();
-        btn.textContent = 'Start Recording';
-        btn.disabled = false;
-        loading.style.display = 'none';
-        recording = false;
-    }
-    }
 
-    function downsampleBuffer(buffer, sampleRate, outSampleRate) {
-    if (outSampleRate === sampleRate) return buffer;
-    if (outSampleRate > sampleRate) {
-        console.warn('Target sample rate is higher than original. Returning original buffer.');
-        return buffer;
-    }
-    const sampleRateRatio = sampleRate / outSampleRate;
-    const newLength = Math.round(buffer.length / sampleRateRatio);
-    const result = new Float32Array(newLength);
-    let offsetResult = 0;
-    let offsetBuffer = 0;
-    while (offsetResult < result.length) {
-        const nextOffsetBuffer = Math.round((offsetResult + 1) * sampleRateRatio);
-        // average the samples between offsets
-        let accum = 0, count = 0;
-        for (let i = offsetBuffer; i < nextOffsetBuffer && i < buffer.length; i++) {
-        accum += buffer[i];
-        count++;
+        function floatTo16BitPCM(float32Array) {
+            const l = float32Array.length;
+            const buffer = new ArrayBuffer(l * 2);
+            const view = new DataView(buffer);
+            let offset = 0;
+            for (let i = 0; i < l; i++, offset += 2) {
+                let s = Math.max(-1, Math.min(1, float32Array[i]));
+                view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+            }
+            return view;
         }
-        result[offsetResult] = count ? (accum / count) : 0;
-        offsetResult++;
-        offsetBuffer = nextOffsetBuffer;
-    }
-    return result;
-    }
 
-    function floatTo16BitPCM(float32Array) {
-    const l = float32Array.length;
-    const buffer = new ArrayBuffer(l * 2);
-    const view = new DataView(buffer);
-    let offset = 0;
-    for (let i = 0; i < l; i++, offset += 2) {
-        let s = Math.max(-1, Math.min(1, float32Array[i]));
-        view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
-    }
-    return view;
-    }
-
-    function writeString(view, offset, string) {
-    for (let i = 0; i < string.length; i++) {
-        view.setUint8(offset + i, string.charCodeAt(i));
-    }
-    }
-
-    function encodeWAV(samples, sampleRate) {
-    const sampleBits = 16;
-    const bytesPerSample = sampleBits / 8;
-    const blockAlign = 1 * bytesPerSample;
-    const byteLength = samples.length * bytesPerSample;
-    const buffer = new ArrayBuffer(44 + byteLength);
-    const view = new DataView(buffer);
-
-    /* RIFF identifier */
-    writeString(view, 0, 'RIFF');
-    /* file length */
-    view.setUint32(4, 36 + byteLength, true);
-    /* RIFF type */
-    writeString(view, 8, 'WAVE');
-    /* format chunk identifier */
-    writeString(view, 12, 'fmt ');
-    /* format chunk length */
-    view.setUint32(16, 16, true);
-    /* sample format (raw) */
-    view.setUint16(20, 1, true);
-    /* channel count */
-    view.setUint16(22, 1, true);
-    /* sample rate */
-    view.setUint32(24, sampleRate, true);
-    /* byte rate (sampleRate * blockAlign) */
-    view.setUint32(28, sampleRate * blockAlign, true);
-    /* block align (channel count * bytes per sample) */
-    view.setUint16(32, blockAlign, true);
-    /* bits per sample */
-    view.setUint16(34, sampleBits, true);
-    /* data chunk identifier */
-    writeString(view, 36, 'data');
-    /* data chunk length */
-    view.setUint32(40, byteLength, true);
-
-    // PCM samples
-    const pcmView = floatTo16BitPCM(samples);
-    // copy PCM bytes to view
-    let offset = 44;
-    for (let i = 0; i < pcmView.byteLength; i++) {
-        view.setUint8(offset + i, pcmView.getUint8(i));
-    }
-
-    return new Blob([view], { type: 'audio/wav' });
-    }
-
-    function cleanupLocal() {
-    try {
-        if (recorderWorker) {
-        try { recorderWorker.processor.disconnect(); } catch (e) {}
-        try { recorderWorker.source.disconnect(); } catch (e) {}
+        function writeString(view, offset, string) {
+            for (let i = 0; i < string.length; i++) {
+                view.setUint8(offset + i, string.charCodeAt(i));
+            }
         }
-    } catch (e) {}
-    try { if (mediaStream) mediaStream.getTracks().forEach(t => t.stop()); } catch (e) {}
-    try { if (audioContext) audioContext.close(); } catch (e) {}
-    recorderWorker = null;
-    mediaStream = null;
-    audioContext = null;
-    audioData = [];
-    }
+
+        function encodeWAV(samples, sampleRate) {
+            const sampleBits = 16;
+            const bytesPerSample = sampleBits / 8;
+            const blockAlign = 1 * bytesPerSample;
+            const byteLength = samples.length * bytesPerSample;
+            const buffer = new ArrayBuffer(44 + byteLength);
+            const view = new DataView(buffer);
+
+            writeString(view, 0, 'RIFF');
+            view.setUint32(4, 36 + byteLength, true);
+            writeString(view, 8, 'WAVE');
+            writeString(view, 12, 'fmt ');
+            view.setUint32(16, 16, true);
+            view.setUint16(20, 1, true);
+            view.setUint16(22, 1, true);
+            view.setUint32(24, sampleRate, true);
+            view.setUint32(28, sampleRate * blockAlign, true);
+            view.setUint16(32, blockAlign, true);
+            view.setUint16(34, sampleBits, true);
+            writeString(view, 36, 'data');
+            view.setUint32(40, byteLength, true);
+
+            const pcmView = floatTo16BitPCM(samples);
+            let offset = 44;
+            for (let i = 0; i < pcmView.byteLength; i++) {
+                view.setUint8(offset + i, pcmView.getUint8(i));
+            }
+
+            return new Blob([view], { type: 'audio/wav' });
+        }
+
+        function cleanupLocal() {
+            try {
+                if (recorderWorker) {
+                    try { recorderWorker.processor.disconnect(); } catch (e) {}
+                    try { recorderWorker.source.disconnect(); } catch (e) {}
+                }
+            } catch (e) {}
+            try { if (mediaStream) mediaStream.getTracks().forEach(t => t.stop()); } catch (e) {}
+            try { if (audioContext) audioContext.close(); } catch (e) {}
+            recorderWorker = null;
+            mediaStream = null;
+            audioContext = null;
+            audioData = [];
+        }
     </script>
-
 </body>
+
 </html>

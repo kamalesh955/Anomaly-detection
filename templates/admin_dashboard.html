@@ -1,17 +1,17 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Admin Dashboard</title>
     <style>
+        /* Your existing CSS here */
         * {
             margin: 0;
             padding: 0;
             box-sizing: border-box;
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
         }
-
         body {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             min-height: 100vh;
@@ -20,7 +20,6 @@
             justify-content: center;
             padding: 20px;
         }
-
         .dashboard {
             background: white;
             padding: 40px;
@@ -30,24 +29,20 @@
             max-width: 1000px;
             text-align: center;
         }
-
         h2 {
             text-align: center;
             color: #333;
             margin-bottom: 30px;
         }
-
         .section {
             margin-bottom: 20px;
             text-align: left;
         }
-
         h3 {
             color: #555;
             font-weight: 500;
             margin-bottom: 15px;
         }
-
         table {
             width: 100%;
             border-collapse: collapse;
@@ -55,28 +50,23 @@
             border-radius: 5px;
             overflow: hidden;
         }
-
         th, td {
             padding: 12px 15px;
             text-align: left;
             border-bottom: 1px solid #ddd;
         }
-
         th {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
             font-weight: 600;
         }
-
         td {
             color: #333;
         }
-
         tr:hover td {
             background: #f1f1f1;
             transition: background 0.3s ease;
         }
-
         .logout {
             width: 100%;
             padding: 12px;
@@ -90,11 +80,9 @@
             transition: transform 0.2s;
             margin-top: 20px;
         }
-
         .logout:hover {
             transform: translateY(-2px);
         }
-
         .footer {
             text-align: center;
             margin-top: 20px;
@@ -113,12 +101,22 @@
                     <th>Predicted Class</th>
                     <th>Confidence</th>
                     <th>Input Type</th>
+                    <th>Location Link</th>
                 </tr>
                 {% for pred in data.video_predictions %}
                 <tr>
                     <td>{{ pred.class }}</td>
                     <td>{{ pred.confidence }}</td>
                     <td>{{ pred.input_type }}</td>
+                    <td>
+                        {% if pred.latitude is not none and pred.longitude is not none %}
+                        <a href="https://www.google.com/maps?q={{ pred.latitude }},{{ pred.longitude }}" target="_blank">
+                            View Location
+                        </a>
+                        {% else %}
+                        N/A
+                        {% endif %}
+                    </td>
                 </tr>
                 {% endfor %}
             </table>
@@ -129,11 +127,21 @@
                 <tr>
                     <th>Text</th>
                     <th>Input Type</th>
+                    <th>Location Link</th>
                 </tr>
                 {% for trans in data.audio_transcriptions %}
                 <tr>
                     <td>{{ trans.text }}</td>
                     <td>{{ trans.input_type }}</td>
+                    <td>
+                        {% if trans.latitude is not none and trans.longitude is not none %}
+                        <a href="https://www.google.com/maps?q={{ trans.latitude }},{{ trans.longitude }}" target="_blank">
+                            View Location
+                        </a>
+                        {% else %}
+                        N/A
+                        {% endif %}
+                    </td>
                 </tr>
                 {% endfor %}
             </table>

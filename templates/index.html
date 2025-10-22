@@ -18,7 +18,7 @@
             position: relative;
             overflow-x: hidden;
         }
-        
+
         /* Particle Orb Background */
         #orb-background {
             position: fixed;
@@ -29,7 +29,7 @@
             z-index: 0;
             pointer-events: none;
         }
-        
+
         .wrap {
             position: absolute;
             top: 50%;
@@ -105,7 +105,7 @@
                 opacity: 0;
             }
         }
-        
+
         /* Content Styles */
         .container {
             max-width: 1200px;
@@ -238,125 +238,243 @@
     </style>
 </head>
 <body>
-<div class="container">
-    <header>
-        <h1>🎥 Video Anomaly Detection System</h1>
-        <p class="subtitle">AI-powered detection of accidents, robbery, fighting, explosions, and shootings</p>
-    </header>
+    <!-- Particle Orb Background -->
+    <div id="orb-background">
+        <div class="wrap" id="orb"></div>
+    </div>
 
-    <div class="main-content">
-        <!-- Video Upload Card -->
-        <div class="card">
-            <h2>📹 Video Analysis</h2>
-            <p>Upload a video file to detect anomalies and potential threats</p>
-            <div class="upload-area">
-                <label for="videoFile" class="upload-label">Choose Video File</label>
-                <input type="file" id="videoFile" accept="video/*" onchange="showFileName()" />
-                <div id="fileName"></div>
+    <div class="container">
+        <header>
+            <h1> Video Anomaly Detection System</h1>
+            <p class="subtitle">AI-powered detection of accidents, robbery, fighting, explosions, and shootings</p>
+        </header>
+
+        <div class="main-content">
+            <!-- Video Upload Card -->
+            <div class="card">
+                <h2>📹 Video Analysis</h2>
+                <p>Upload a video file to detect anomalies and potential threats</p>
+                
+                <div class="upload-area">
+                    <label for="videoFile" class="upload-label">Choose Video File</label>
+                    <input type="file" id="videoFile" accept="video/*" onchange="showFileName()">
+                    <div id="fileName"></div>
+                </div>
+                
+                <button class="btn" onclick="uploadVideo()" id="videoBtn">Analyze Video</button>
+                <div class="loading" id="videoLoading">Processing... Please wait</div>
             </div>
-            <button class="btn" onclick="uploadVideo()" id="videoBtn">Analyze Video</button>
-            <div class="loading" id="videoLoading" style="display:none;">Processing... Please wait</div>
+
+            <!-- Audio Input Card -->
+            <div class="card">
+                <h2>🎤 Audio Analysis</h2>
+                <p>Use your microphone to record and transcribe audio in real-time</p>
+                
+                <div class="upload-area">
+                    <p style="color: rgba(255,255,255,0.9);">Click the button below to start recording audio</p>
+                </div>
+                
+                <button class="btn" onclick="window.location.href='{{ url_for('audio') }}'">Go to Audio Page</button>
+            </div>
         </div>
 
-        <!-- Audio Input Card -->
-        <div class="card">
-            <h2>🎤 Audio Analysis</h2>
-            <p>Use your microphone to record and transcribe audio in real-time</p>
-            <div class="upload-area">
-                <p style="color: rgba(255,255,255,0.9);">Click the button below to start recording audio</p>
-            </div>
-            <button class="btn" onclick="window.location.href='{{ url_for('audio') }}'">Go to Audio Page</button>
+        <div class="admin-link">
+            <a href="{{ url_for('login') }}">🔐 Admin Dashboard</a>
         </div>
     </div>
 
-    <div class="admin-link">
-        <a href="{{ url_for('login') }}">🔐 Admin Dashboard</a>
-    </div>
-</div>
+    <script>
+        // Global variables
+        let userLatitude = null;
+        let userLongitude = null;
 
-<script>
-let userLatitude = null;
-let userLongitude = null;
+        // Particle Orb System
+        const wrap = document.getElementById('orb');
+        const particleCount = 800;
+        let particles = [];
 
-function requestLocation() {
-    if (!navigator.geolocation) {
-        alert("Geolocation is not supported by your browser.");
-        return;
-    }
+        function createParticle(i) {
+            const c = document.createElement('div');
+            c.classList.add('c');
+            
+            const size = Math.random() * 3 + 1;
+            c.style.width = `${size}px`;
+            c.style.height = `${size}px`;
+            
+            const hue = (i * 360 / particleCount + Math.random() * 30) % 360;
+            const saturation = 70 + Math.random() * 30;
+            const lightness = 50 + Math.random() * 20;
+            c.style.backgroundColor = `hsl(${hue}, ${saturation}%, ${lightness}%)`;
+            c.style.color = `hsl(${hue}, ${saturation}%, ${lightness}%)`;
+            
+            const duration = 8 + Math.random() * 12;
+            const delay = Math.random() * duration;
+            c.style.animationDuration = `${duration}s`;
+            c.style.animationDelay = `${delay}s`;
+            c.style.animationIterationCount = 'infinite';
+            c.style.animationTimingFunction = 'ease-in-out';
+            
+            const animType = Math.floor(Math.random() * 3) + 1;
+            c.style.animationName = `move${animType}`;
+            
+            const phi = Math.random() * Math.PI * 2;
+            const theta = Math.random() * Math.PI;
+            const radius = 200 + Math.random() * 400;
+            const wobble = Math.random() * 150 - 75;
+            
+            const x = radius * Math.sin(theta) * Math.cos(phi);
+            const y = radius * Math.sin(theta) * Math.sin(phi);
+            const z = radius * Math.cos(theta);
+            
+            const rotX = Math.random() * 360;
+            const rotY = Math.random() * 360;
+            const rotZ = Math.random() * 360;
+            
+            const keyframeName = `orbit${i}`;
+            const keyframes = `
+                @keyframes ${keyframeName} {
+                    0% {
+                        transform: translate3d(0, 0, 0) rotateX(0deg) rotateY(0deg) scale(0.5);
+                    }
+                    50% {
+                        transform: translate3d(${x * 0.7}px, ${y * 0.7 + wobble}px, ${z * 0.7}px) 
+                                   rotateX(${rotX * 0.5}deg) rotateY(${rotY * 0.5}deg) rotateZ(${rotZ * 0.5}deg) scale(1);
+                    }
+                    100% {
+                        transform: translate3d(${x}px, ${y}px, ${z}px) 
+                                   rotateX(${rotX}deg) rotateY(${rotY}deg) rotateZ(${rotZ}deg) scale(0.3);
+                    }
+                }
+            `;
+            
+            const style = document.createElement('style');
+            style.textContent = keyframes;
+            document.head.appendChild(style);
+            
+            c.style.animationName = `${keyframeName}, move${animType}`;
+            
+            particles.push({
+                element: c,
+                baseX: x,
+                baseY: y,
+                baseZ: z,
+                scatterX: (Math.random() - 0.5) * 2000,
+                scatterY: (Math.random() - 0.5) * 2000,
+                scatterZ: (Math.random() - 0.5) * 2000
+            });
+            
+            wrap.appendChild(c);
+        }
 
-    navigator.geolocation.getCurrentPosition(
-        (pos) => {
-            userLatitude = pos.coords.latitude;
-            userLongitude = pos.coords.longitude;
-        },
-        (err) => {
-            if (err.code === err.PERMISSION_DENIED) {
-                alert('Location permission denied. Please allow location access for full functionality.');
-            } else {
-                alert('Failed to get your location: ' + err.message);
-            }
-        },
-        { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
-    );
-}
+        // Initialize particles
+        for (let i = 0; i < particleCount; i++) {
+            createParticle(i);
+        }
 
-document.addEventListener("DOMContentLoaded", () => {
-    requestLocation();
-});
+        // Hover effects on cards
+        const cards = document.querySelectorAll('.card');
+        cards.forEach(card => {
+            card.addEventListener('mouseenter', () => {
+                particles.forEach(p => {
+                    p.element.style.animationPlayState = 'paused';
+                    p.element.style.transition = 'transform 0.8s cubic-bezier(0.34, 1.56, 0.64, 1)';
+                    p.element.style.transform = `translate3d(${p.scatterX}px, ${p.scatterY}px, ${p.scatterZ}px) scale(0.5)`;
+                    p.element.style.opacity = '0.3';
+                });
+            });
 
-function showFileName() {
-    const input = document.getElementById('videoFile');
-    const fileNameDiv = document.getElementById('fileName');
-    if (input.files.length > 0) {
-        fileNameDiv.textContent = '✓ Selected: ' + input.files[0].name;
-    }
-}
-
-async function uploadVideo() {
-    const fileInput = document.getElementById('videoFile');
-    const btn = document.getElementById('videoBtn');
-    const loading = document.getElementById('videoLoading');
-
-    if (!fileInput.files.length) {
-        alert('Please select a video file first');
-        return;
-    }
-
-    if (userLatitude === null || userLongitude === null) {
-        alert('Waiting for GPS location. Please allow location permission in your browser.');
-        return;
-    }
-
-    const formData = new FormData();
-    formData.append('file', fileInput.files[0]);
-    formData.append('latitude', userLatitude);
-    formData.append('longitude', userLongitude);
-
-    btn.disabled = true;
-    loading.style.display = 'block';
-
-    try {
-        const response = await fetch('/predict_video', {
-            method: 'POST',
-            body: formData
+            card.addEventListener('mouseleave', () => {
+                particles.forEach(p => {
+                    p.element.style.transition = 'transform 1s ease-in-out, opacity 1s ease-in-out';
+                    p.element.style.transform = '';
+                    p.element.style.opacity = '';
+                    setTimeout(() => {
+                        p.element.style.animationPlayState = 'running';
+                    }, 1000);
+                });
+            });
         });
 
-        const data = await response.json();
+        // Geolocation functions
+        function requestLocation() {
+            if (!navigator.geolocation) {
+                alert("Geolocation is not supported by your browser.");
+                return;
+            }
 
-        if (data.error) {
-            alert('Error: ' + data.error);
-        } else {
-            window.location.href = `/result?pred=${data.prediction}&conf=${data.confidence}&input_type=${data.input_type}`;
+            navigator.geolocation.getCurrentPosition(
+                (pos) => {
+                    userLatitude = pos.coords.latitude;
+                    userLongitude = pos.coords.longitude;
+                },
+                (err) => {
+                    if (err.code === err.PERMISSION_DENIED) {
+                        alert('Location permission denied. Please allow location access for full functionality.');
+                    } else {
+                        alert('Failed to get your location: ' + err.message);
+                    }
+                },
+                { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
+            );
         }
-    } catch (error) {
-        alert('Error uploading video: ' + error);
-    } finally {
-        btn.disabled = false;
-        loading.style.display = 'none';
-    }
-}
-</script>
+
+        // Initialize location on page load
+        document.addEventListener("DOMContentLoaded", () => {
+            requestLocation();
+        });
+
+        // Video upload functionality
+        function showFileName() {
+            const input = document.getElementById('videoFile');
+            const fileNameDiv = document.getElementById('fileName');
+            if (input.files.length > 0) {
+                fileNameDiv.textContent = '✓ Selected: ' + input.files[0].name;
+            }
+        }
+
+        async function uploadVideo() {
+            const fileInput = document.getElementById('videoFile');
+            const btn = document.getElementById('videoBtn');
+            const loading = document.getElementById('videoLoading');
+
+            if (!fileInput.files.length) {
+                alert('Please select a video file first');
+                return;
+            }
+
+            if (userLatitude === null || userLongitude === null) {
+                alert('Waiting for GPS location. Please allow location permission in your browser.');
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+            formData.append('latitude', userLatitude);
+            formData.append('longitude', userLongitude);
+
+            btn.disabled = true;
+            loading.style.display = 'block';
+
+            try {
+                const response = await fetch('/predict_video', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+
+                if (data.error) {
+                    alert('Error: ' + data.error);
+                } else {
+                    window.location.href = `/result?pred=${data.prediction}&conf=${data.confidence}&input_type=${data.input_type}`;
+                }
+            } catch (error) {
+                alert('Error uploading video: ' + error);
+            } finally {
+                btn.disabled = false;
+                loading.style.display = 'none';
+            }
+        }
+    </script>
 </body>
-
-
 </html>

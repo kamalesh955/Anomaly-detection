@@ -1,6 +1,7 @@
 import os
 import torch
 import gdown
+os.system("apt-get update && apt-get install -y libglib2.0-0 ffmpeg > /dev/null 2>&1")
 import cv2
 import numpy as np
 import torch

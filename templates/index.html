@@ -235,6 +235,43 @@
             color: #fff;
             text-shadow: 0 0 10px rgba(102, 126, 234, 0.8);
         }
+        
+        /* Location Status Styles */
+        .location-status {
+            margin-top: 15px;
+            padding: 12px;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 8px;
+            font-size: 13px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            transition: all 0.3s ease;
+        }
+        .location-status.loading {
+            color: #ffd700;
+            display: flex;
+        }
+        .location-status.success {
+            color: #51cf66;
+            display: flex;
+        }
+        .location-status.error {
+            color: #ff6b6b;
+            display: flex;
+        }
+        .location-status .spinner {
+            width: 14px;
+            height: 14px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-top-color: currentColor;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
     </style>
 </head>
 <body>
@@ -245,7 +282,7 @@
 
     <div class="container">
         <header>
-            <h1> Video Anomaly Detection System</h1>
+            <h1>🎥 Video Anomaly Detection System</h1>
             <p class="subtitle">AI-powered detection of accidents, robbery, fighting, explosions, and shootings</p>
         </header>
 
@@ -259,6 +296,10 @@
                     <label for="videoFile" class="upload-label">Choose Video File</label>
                     <input type="file" id="videoFile" accept="video/*" onchange="showFileName()">
                     <div id="fileName"></div>
+                    <div id="locationStatus" class="location-status loading">
+                        <div class="spinner"></div>
+                        <span>Getting your location...</span>
+                    </div>
                 </div>
                 
                 <button class="btn" onclick="uploadVideo()" id="videoBtn">Analyze Video</button>
@@ -274,12 +315,12 @@
                     <p style="color: rgba(255,255,255,0.9);">Click the button below to start recording audio</p>
                 </div>
                 
-                <button class="btn" onclick="window.location.href='{{ url_for('audio') }}'">Go to Audio Page</button>
+                <button class="btn" onclick="window.location.href='/audio'">Go to Audio Page</button>
             </div>
         </div>
 
         <div class="admin-link">
-            <a href="{{ url_for('login') }}">🔐 Admin Dashboard</a>
+            <a href="/login">🔐 Admin Dashboard</a>
         </div>
     </div>
 
@@ -287,6 +328,7 @@
         // Global variables
         let userLatitude = null;
         let userLongitude = null;
+        let locationAttempted = false;
 
         // Particle Orb System
         const wrap = document.getElementById('orb');
@@ -396,25 +438,59 @@
         });
 
         // Geolocation functions
+        function updateLocationStatus(status, message, cssClass) {
+            const statusDiv = document.getElementById('locationStatus');
+            statusDiv.className = `location-status ${cssClass}`;
+            
+            if (cssClass === 'loading') {
+                statusDiv.innerHTML = `<div class="spinner"></div><span>${message}</span>`;
+            } else if (cssClass === 'success') {
+                statusDiv.innerHTML = `<span>✓ ${message}</span>`;
+            } else if (cssClass === 'error') {
+                statusDiv.innerHTML = `<span>⚠️ ${message}</span>`;
+            }
+        }
+
         function requestLocation() {
             if (!navigator.geolocation) {
-                alert("Geolocation is not supported by your browser.");
+                updateLocationStatus('error', 'Geolocation not supported', 'error');
+                locationAttempted = true;
                 return;
             }
+
+            updateLocationStatus('loading', 'Getting your location...', 'loading');
 
             navigator.geolocation.getCurrentPosition(
                 (pos) => {
                     userLatitude = pos.coords.latitude;
                     userLongitude = pos.coords.longitude;
+                    locationAttempted = true;
+                    
+                    const lat = userLatitude.toFixed(4);
+                    const lon = userLongitude.toFixed(4);
+                    updateLocationStatus('success', `Location: ${lat}, ${lon}`, 'success');
+                    
+                    console.log('✅ Location acquired:', userLatitude, userLongitude);
                 },
                 (err) => {
+                    locationAttempted = true;
+                    console.error('Location error:', err);
+                    
                     if (err.code === err.PERMISSION_DENIED) {
-                        alert('Location permission denied. Please allow location access for full functionality.');
+                        updateLocationStatus('error', 'Location permission denied', 'error');
+                    } else if (err.code === err.POSITION_UNAVAILABLE) {
+                        updateLocationStatus('error', 'Location unavailable', 'error');
+                    } else if (err.code === err.TIMEOUT) {
+                        updateLocationStatus('error', 'Location timeout', 'error');
                     } else {
-                        alert('Failed to get your location: ' + err.message);
+                        updateLocationStatus('error', 'Location failed', 'error');
                     }
                 },
-                { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
+                { 
+                    enableHighAccuracy: true, 
+                    timeout: 15000,
+                    maximumAge: 0
+                }
             );
         }
 
@@ -442,15 +518,31 @@
                 return;
             }
 
-            if (userLatitude === null || userLongitude === null) {
-                alert('Waiting for GPS location. Please allow location permission in your browser.');
+            // Check if location was attempted
+            if (!locationAttempted) {
+                alert('Please wait for location detection to complete...');
                 return;
+            }
+
+            // Warn if location is not available
+            if (userLatitude === null || userLongitude === null) {
+                const proceed = confirm('Location not available. Upload video without location data?\n\n(Location may be required for emergency services)');
+                if (!proceed) {
+                    return;
+                }
             }
 
             const formData = new FormData();
             formData.append('file', fileInput.files[0]);
-            formData.append('latitude', userLatitude);
-            formData.append('longitude', userLongitude);
+            
+            // Only append location if available
+            if (userLatitude !== null && userLongitude !== null) {
+                formData.append('latitude', userLatitude);
+                formData.append('longitude', userLongitude);
+                console.log('📍 Sending location:', userLatitude, userLongitude);
+            } else {
+                console.log('⚠️ Uploading without location data');
+            }
 
             btn.disabled = true;
             loading.style.display = 'block';

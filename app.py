@@ -1,4 +1,6 @@
 import os
+import torch
+import gdown
 import cv2
 import numpy as np
 import torch
@@ -55,12 +57,38 @@ class HierarchicalVideoClassifierR2plus1D(nn.Module):
         return out_bin, out_anom
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+# ✅ Cache model in user home directory so it's persistent across restarts
+cache_dir = os.path.expanduser("~/.cache/emergency_model")
+os.makedirs(cache_dir, exist_ok=True)
+
+model_path = os.path.join(cache_dir, "best_r2p1d_hierarchical.pth")
+
+# ✅ Google Drive file ID (from your provided link)
+drive_file_id = "1nN84_zyLeL7SEKd3u8JiXhPPvjMzCLUt"
+drive_url = f"https://drive.google.com/uc?id={drive_file_id}"
+
+# ✅ Download if not already cached
+if not os.path.exists(model_path):
+    print("⬇️ Downloading model from Google Drive to cache...")
+    try:
+        gdown.download(drive_url, model_path, quiet=False)
+        print(f"✅ Model cached successfully at {model_path}")
+    except Exception as e:
+        print(f"⚠️ Error downloading model: {e}")
+else:
+    print(f"✅ Using cached model from {model_path}")
+
+# ✅ Define model architecture (must match training)
 model = HierarchicalVideoClassifierR2plus1D(pretrained=False).to(device)
+
+# ✅ Load model weights safely
 try:
-    model.load_state_dict(torch.load('best_r2p1d_hierarchical.pth', map_location=device))
-    print("Model loaded successfully")
-except RuntimeError as e:
-    print(f"Error loading model: {e}")
+    model.load_state_dict(torch.load(model_path, map_location=device))
+    print("✅ Model loaded successfully and ready for inference.")
+except Exception as e:
+    print(f"❌ Error loading model: {e}")
+
 model.eval()
 
 classes = ["accident", "robbery", "fighting", "explosion", "shooting", "normal"]

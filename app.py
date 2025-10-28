@@ -3,13 +3,14 @@ import torch
 import gdown
 import cv2
 import numpy as np
-import torch
 import torchvision.transforms as transforms
 from werkzeug.utils import secure_filename
 from torch import nn
 import torchvision.models.video as video_models
 import speech_recognition as sr
-import pyttsx3
+from gtts import gTTS
+import io
+import base64
 import random
 import sqlite3
 import tempfile
@@ -22,17 +23,32 @@ from wtforms.validators import DataRequired
 from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime
 
-# Threshold for anomaly detection
+# -----------------------------
+# CONFIGURATION
+# -----------------------------
 threshold = 0.5
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-# Speech recognition and TTS
-r = sr.Recognizer()
-r.pause_threshold = 10
-r.phrase_threshold = 0.3
-r.non_speaking_duration = 0.8
-engine = pyttsx3.init()
+# -----------------------------
+# SPEECH: Text-to-Speech Helper
+# -----------------------------
+def speak(text):
+    """Convert text to speech using gTTS and return base64 audio string."""
+    try:
+        tts = gTTS(text)
+        with io.BytesIO() as audio_fp:
+            tts.write_to_fp(audio_fp)
+            audio_fp.seek(0)
+            audio_bytes = audio_fp.read()
+            audio_base64 = base64.b64encode(audio_bytes).decode("utf-8")
+            return f"data:audio/mp3;base64,{audio_base64}"
+    except Exception as e:
+        print(f"❌ TTS Error: {e}")
+        return None
 
-# Video classification model
+# -----------------------------
+# MODEL SETUP AND CACHING
+# -----------------------------
 class HierarchicalVideoClassifierR2plus1D(nn.Module):
     def __init__(self, pretrained=True, dropout=0.5):
         super().__init__()
@@ -56,36 +72,28 @@ class HierarchicalVideoClassifierR2plus1D(nn.Module):
         out_anom = self.head_anomaly(feats)
         return out_bin, out_anom
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-# ✅ Cache model in user home directory so it's persistent across restarts
+# Cache model in home directory
 cache_dir = os.path.expanduser("~/.cache/emergency_model")
 os.makedirs(cache_dir, exist_ok=True)
 
 model_path = os.path.join(cache_dir, "best_r2p1d_hierarchical.pth")
-
-# ✅ Google Drive file ID (from your provided link)
 drive_file_id = "1nN84_zyLeL7SEKd3u8JiXhPPvjMzCLUt"
 drive_url = f"https://drive.google.com/uc?id={drive_file_id}"
 
-# ✅ Download if not already cached
 if not os.path.exists(model_path):
-    print("⬇️ Downloading model from Google Drive to cache...")
+    print("⬇️ Downloading model from Google Drive...")
     try:
         gdown.download(drive_url, model_path, quiet=False)
-        print(f"✅ Model cached successfully at {model_path}")
+        print(f"✅ Model downloaded to {model_path}")
     except Exception as e:
         print(f"⚠️ Error downloading model: {e}")
 else:
-    print(f"✅ Using cached model from {model_path}")
+    print(f"✅ Using cached model at {model_path}")
 
-# ✅ Define model architecture (must match training)
 model = HierarchicalVideoClassifierR2plus1D(pretrained=False).to(device)
-
-# ✅ Load model weights safely
 try:
     model.load_state_dict(torch.load(model_path, map_location=device))
-    print("✅ Model loaded successfully and ready for inference.")
+    print("✅ Model loaded successfully.")
 except Exception as e:
     print(f"❌ Error loading model: {e}")
 
@@ -101,19 +109,21 @@ transform = transforms.Compose([
                          std=[0.22803, 0.22145, 0.216989]),
 ])
 
+# -----------------------------
+# FLASK APP INITIALIZATION
+# -----------------------------
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'powerhouse'
 app.config['UPLOAD_FOLDER'] = 'uploads'
 app.config['ALLOWED_EXTENSIONS'] = {'mp4', 'avi', 'mov', 'mkv', 'wav', 'webm', 'ogg'}
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
+# -----------------------------
+# LOGIN SYSTEM
+# -----------------------------
 login_manager = LoginManager()
 login_manager.init_app(app)
 login_manager.login_view = 'login'
-
-@app.context_processor
-def inject_user():
-    return dict(user=current_user)
 
 users = {'admin': {'password_hash': generate_password_hash('adminpass123'), 'role': 'admin'}}
 
@@ -131,6 +141,13 @@ class LoginForm(FlaskForm):
     password = PasswordField('Password', validators=[DataRequired()])
     submit = SubmitField('Login')
 
+@app.context_processor
+def inject_user():
+    return dict(user=current_user)
+
+# -----------------------------
+# DATABASE SETUP
+# -----------------------------
 def get_db():
     if 'db' not in g:
         g.db = sqlite3.connect('emergency_response.db', check_same_thread=False)
@@ -169,6 +186,9 @@ def close_db(exception):
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in app.config['ALLOWED_EXTENSIONS']
 
+# -----------------------------
+# VIDEO PROCESSING
+# -----------------------------
 def extract_frames(video_path, clip_len=16, frame_skip=5):
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
@@ -193,6 +213,9 @@ def extract_frames(video_path, clip_len=16, frame_skip=5):
     frames = torch.stack(frames).permute(1, 0, 2, 3)
     return frames.unsqueeze(0)
 
+# -----------------------------
+# ROUTES
+# -----------------------------
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     form = LoginForm()
@@ -204,7 +227,7 @@ def login():
         return render_template('login.html', form=form, error='Invalid username or password')
     return render_template('login.html', form=form)
 
-@app.route('/logout', methods=['GET', 'POST'])
+@app.route('/logout')
 @login_required
 def logout():
     logout_user()
@@ -216,9 +239,9 @@ def admin_dashboard():
     db = get_db()
     cursor = db.cursor()
     cursor.execute('SELECT class, confidence, input_type, latitude, longitude FROM predictions WHERE input_type = ?', ('video',))
-    video_predictions = [{'class': row[0], 'confidence': f"{row[1]:.2%}", 'input_type': row[2], 'latitude': row[3], 'longitude': row[4]} for row in cursor.fetchall()]
-    cursor.execute('SELECT text, input_type, latitude, longitude FROM transcriptions WHERE input_type = ?', ('audio',))
-    audio_transcriptions = [{'text': row[0], 'input_type': row[1], 'latitude': row[2], 'longitude': row[3]} for row in cursor.fetchall()]
+    video_predictions = [{'class': row[0], 'confidence': f"{row[1]:.2%}", 'latitude': row[3], 'longitude': row[4]} for row in cursor.fetchall()]
+    cursor.execute('SELECT text, latitude, longitude FROM transcriptions WHERE input_type = ?', ('audio',))
+    audio_transcriptions = [{'text': row[0], 'latitude': row[1], 'longitude': row[2]} for row in cursor.fetchall()]
     return render_template('admin_dashboard.html', data={'video_predictions': video_predictions, 'audio_transcriptions': audio_transcriptions})
 
 @app.route('/predict_video', methods=['POST'])
@@ -253,16 +276,18 @@ def predict_video():
                     pred_idx = torch.argmax(p_anom).item()
                     pred_class = classes[pred_idx]
                     confidence = p_anom[pred_idx].item()
+                    alert_audio = speak(f"Alert! {pred_class} detected with {confidence*100:.1f} percent confidence.")
                 else:
                     pred_class = "normal"
                     confidence = 1 - p_bin
+                    alert_audio = speak("No anomaly detected. Situation normal.")
 
             cursor.execute('INSERT INTO predictions (class, confidence, input_type, latitude, longitude, timestamp) VALUES (?, ?, ?, ?, ?, ?)',
                            (pred_class, confidence, 'video', latitude, longitude, datetime.utcnow()))
             db.commit()
             os.remove(video_path)
 
-            return jsonify({'prediction': pred_class, 'confidence': f"{confidence:.2%}", 'input_type': 'video'})
+            return jsonify({'prediction': pred_class, 'confidence': f"{confidence:.2%}", 'audio': alert_audio})
         else:
             return jsonify({'error': 'Invalid file type'}), 400
     except Exception as e:
@@ -273,77 +298,44 @@ def predict_video():
 def predict_audio():
     db = get_db()
     cursor = db.cursor()
-    def _safe_remove(path):
-        if path and os.path.exists(path):
-            os.remove(path)
-
     if "audio" not in request.files:
         return jsonify({"error": "No audio file part"}), 400
-
     audio_file = request.files["audio"]
     if not audio_file or audio_file.filename == "":
         return jsonify({"error": "No file uploaded"}), 400
-
     filename = secure_filename(audio_file.filename)
     ext = os.path.splitext(filename)[1].lower()
     if ext != ".wav":
         return jsonify({"error": "Only WAV files accepted"}), 400
-
     tmp_wav = None
     try:
         with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as f:
             audio_file.save(f.name)
             tmp_wav = f.name
-
-        if os.path.getsize(tmp_wav) == 0:
-            _safe_remove(tmp_wav)
-            return jsonify({"error": "Empty file"}), 400
-        
-        latitude = request.form.get('latitude', type=float)
-        longitude = request.form.get('longitude', type=float)
-
         recognizer = sr.Recognizer()
         with sr.AudioFile(tmp_wav) as source:
             audio_data = recognizer.record(source)
-
         try:
             text = recognizer.recognize_google(audio_data)
             cursor.execute('INSERT INTO transcriptions (text, input_type, latitude, longitude, timestamp) VALUES (?, ?, ?, ?, ?)',
-                           (text, 'audio', latitude, longitude, datetime.utcnow()))
+                           (text, 'audio', None, None, datetime.utcnow()))
             db.commit()
-            return jsonify({"text": text})
+            alert_audio = speak(f"Received audio: {text}")
+            return jsonify({"text": text, "audio": alert_audio})
         except sr.UnknownValueError:
             return jsonify({"error": "Unintelligible speech"}), 200
         except sr.RequestError as e:
             return jsonify({"error": f"Recognition error: {e}"}), 500
     except Exception as e:
         tb = traceback.format_exc()
-        print("=== /predict_audio ERROR ===")
         print(tb)
         return jsonify({"error": "Server error", "detail": str(e)}), 500
     finally:
-        _safe_remove(tmp_wav)
+        if tmp_wav and os.path.exists(tmp_wav):
+            os.remove(tmp_wav)
 
-@app.route('/result')
-def result():
-    pred = request.args.get('pred', 'Unknown')
-    conf = request.args.get('conf', '0%')
-    input_type = request.args.get('input_type', 'Unknown')
-    return render_template('result.html', prediction=pred, confidence=conf, input_type=input_type)
-
-@app.route('/audio_result')
-def audio_result():
-    text = request.args.get('text', 'No text recognized')
-    return render_template('audio_result.html', text=text)
-
-@app.route('/audio')
-def audio():
-    return render_template('audio.html')
-
-@app.route('/', methods=['GET', 'POST'])
+@app.route('/')
 def index():
-    if request.method == 'POST':
-        return "POST not handled on /", 405
     return render_template('index.html')
 
 if __name__ == '__main__':
